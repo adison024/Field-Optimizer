@@ -13,30 +13,6 @@ def showimage(img):
     cv2.destroyAllWindows()
 
 
-def power_calc(start, end, step):
-    k = start
-    while k < end:
-        C_EWY = k
-        C_NSX = math.floor(10 * ((max_area / ((EWC - 1) * C_EWY + 25)) - 25) / (NSC - 1)) / 10
-        if C_NSX < 26:
-            break
-        area = ((NSC - 1) * C_NSX + 25) * ((EWC - 1) * C_EWY + 25) / 4046.85642
-        C_EWY = rf * C_EWY
-        C_NSX = rf * C_NSX
-        for hr in range(0, 24):
-            sf[hr] = 0
-        for hr in range(0, 24):
-            if alpha[hr] * dni[hr] > 0:  # preforming area calculations only if sun is above horizon
-                sf[hr] = sf[hr] + dni[hr] * conv_c2s(math.radians(alpha[hr]), math.radians(gamma[hr]))
-        if sum(sf) > max_energy:
-            max_energy = sum(sf)
-            max_EW = C_EWY
-            max_NS = C_NSX
-        print(counter, "of 42", "\tNSX = ", round(C_NSX) / 100, "\tEWY =", round(C_EWY) / 100, "\tThermal Power =",
-              round(sum(sf) * 100) / 100, "\tArea =", round(area * 100) / 100)
-        k = k + step
-
-
 def cp(y_center, x_center):
     # Parameters passed are (x,y) but read are (y,x). This is to compensate the way images are processed
     res = rf * side_multiplier
@@ -118,13 +94,15 @@ def overlaparea(nsx, nsy, ewx, ewy, nsc, ewc):
     return cv2.countNonZero(sunviewimg)
 
 
-def conv_c2s(zenith, azimuth):
-    ewx = ((C_EWX + C_EWY * math.tan(azimuth)) / (1 + math.tan(azimuth) * math.tan(azimuth))) / math.cos(
+def conv_c2s(zenith, azimuth, nsx, ewy):
+    ewx = 0
+    nsy = 0
+    ewx = ((ewx + ewy * math.tan(azimuth)) / (1 + math.tan(azimuth) * math.tan(azimuth))) / math.cos(
         azimuth) * math.sin(zenith)
-    nsx = ((C_NSX + C_NSY * math.tan(azimuth)) / (1 + math.tan(azimuth) * math.tan(azimuth))) / math.cos(
+    nsx = ((nsx + nsy * math.tan(azimuth)) / (1 + math.tan(azimuth) * math.tan(azimuth))) / math.cos(
         azimuth) * math.sin(zenith)
-    ewy = C_EWY * math.cos(azimuth) - C_EWX * math.sin(azimuth)
-    nsy = C_NSY * math.cos(azimuth) - C_NSX * math.sin(azimuth)
+    ewy = ewy * math.cos(azimuth) - ewx * math.sin(azimuth)
+    nsy = nsy * math.cos(azimuth) - nsx * math.sin(azimuth)
 
     # Finding intermediate distance between dishes to select the calculation method.
     osn = math.sqrt(nsx ** 2 + nsy ** 2)
@@ -158,6 +136,34 @@ def conv_c2s(zenith, azimuth):
         return round(fraction, 4)
 
 
+def power_calc(start, end, step):
+    k = start
+    # max_NS = 26  # Optimized NS Spacing
+    max_EW = 26  # Optimized EW Spacing
+    max_energy = 0  # Optimized Energy Generation
+    while k <= end:
+        C_EWY = k
+        C_NSX = math.floor(10 * ((max_area / ((EWC - 1) * C_EWY + 25)) - 25) / (NSC - 1)) / 10
+        if C_NSX < 26:
+            break
+        area = ((NSC - 1) * C_NSX + 25) * ((EWC - 1) * C_EWY + 25) / 4046.85642
+        C_EWY = rf * C_EWY
+        C_NSX = rf * C_NSX
+        for hr in range(0, 24):
+            sf[hr] = 0
+        for hr in range(0, 24):
+            if alpha[hr] * dni[hr] > 0:  # preforming area calculations only if sun is above horizon
+                sf[hr] = sf[hr] + dni[hr] * conv_c2s(math.radians(alpha[hr]), math.radians(gamma[hr]), C_NSX, C_EWY)
+        if sum(sf) > max_energy:
+            max_energy = sum(sf)
+            max_EW = C_EWY
+            # max_NS = C_NSX
+        print("NSX = ", round(C_NSX) / 100, "\tEWY =", round(C_EWY) / 100, "\tThermal Power =", round(sum(sf) * 100) / 100, "\tArea =", round(area * 100) / 100)
+        # print(k)
+        k = k + step
+    return max_EW/rf
+
+
 # Main program starts
 start_time = time.process_time()  # For Time of calculation
 alpha = np.zeros(24, dtype='float32')  # Zenith Angle of Sun
@@ -169,7 +175,7 @@ rf = 100  # Resolution Factor
 max_dia = rf * 2 * math.sqrt(10.5 ** 2 + 5.5 ** 2) * side_multiplier
 
 # Opening Input File
-with open("C:\\Users\\ahson\Google Drive\Testing Ground\PY Files\Field-Optimizer\CSV_1_Day_Data.csv",
+with open("C:\\Users\\ahson\Google Drive\Testing Ground\PY Files\Field Optimizer\Field-Optimizer\CSV_1_Day_Data.csv",
           'r') as csv_file_in:
     csv_reader = csv.reader(csv_file_in)
     for line in csv_reader:
@@ -188,90 +194,21 @@ C_NSY = 0  # NS Spacing in Y Direction
 C_EWX = 0  # EW Spacing in X Direction
 NSC = 10  # Number of dishes in NS Direction
 EWC = 5  # Number of dishes in EW Direction
-max_NS = 26  # Optimized NS Spacing
-max_EW = 26  # Optimized EW Spacing
-max_energy = 0  # Optimized Energy Generation
 max_area_acre = 20  # Area Constraint in Acres
 max_area = max_area_acre * 4046.85642  # Area Constraint in sq. mtrs
 counter = 1
 SingleDishArea = 485  # overlaparea(rf, 0, 0, 0, 0, 1, 1) / (rf ** 2)  #area of single Dish, Should be 485
 MaxSFDishArea = SingleDishArea * NSC * EWC  # area of solar field with 0 shadows
 
-print('Parameters Initialized, Calculating Areas...')
+print('Parameters Initialized, Calculating Areas...\n\nCalculating First Step...')
 
-# First 15 Step Process
-print('Performing First Step of Optimisation...')
-for i in range(0, 15):
-    C_EWY = 26 + 4 * i
-    C_NSX = math.floor(10 * ((max_area / ((EWC - 1) * C_EWY + 25)) - 25) / (NSC - 1)) / 10
-    if C_NSX < 26:
-        break
-    area = ((NSC - 1) * C_NSX + 25) * ((EWC - 1) * C_EWY + 25) / 4046.85642
-    C_EWY = rf * C_EWY
-    C_NSX = rf * C_NSX
-    for hr in range(0, 24):
-        sf[hr] = 0
-    for hr in range(0, 24):
-        if alpha[hr] * dni[hr] > 0:  # preforming area calculations only if sun is above horizon
-            sf[hr] = sf[hr] + dni[hr] * conv_c2s(math.radians(alpha[hr]), math.radians(gamma[hr]))
-    if sum(sf) > max_energy:
-        max_energy = sum(sf)
-        max_EW = C_EWY
-        max_NS = C_NSX
-    print(counter, "of 42", "\tNSX = ", round(C_NSX) / 100, "\tEWY =", round(C_EWY) / 100, "\tThermal Power =",
-          round(sum(sf) * 100) / 100, "\tArea =", round(area * 100) / 100)
-    counter = counter + 1
+opt_EW = power_calc(26, 82, 4)
+print("First step optimised at EW =", opt_EW, "\n\nCalculating Second Step...")
 
-# Second 8 Step Process
-print('Performing Second Step of Optimisation...')
-for i in range(math.floor(max_EW / rf) - 4, math.ceil(max_EW / rf) + 5):
-    C_EWY = i
-    C_NSX = math.floor(10 * ((max_area / ((EWC - 1) * C_EWY + 25)) - 25) / (NSC - 1)) / 10
-    if C_NSX < 26:
-        break
-    area = ((NSC - 1) * C_NSX + 25) * ((EWC - 1) * C_EWY + 25) / 4046.85642
-    C_EWY = rf * C_EWY
-    C_NSX = rf * C_NSX
-    for hr in range(0, 24):
-        sf[hr] = 0
-    for hr in range(0, 24):
-        if alpha[hr] * dni[hr] > 0:  # preforming area calculations only if sun is above horizon
-            sf[hr] = sf[hr] + dni[hr] * conv_c2s(math.radians(alpha[hr]), math.radians(gamma[hr]))
-    if sum(sf) > max_energy:
-        max_energy = sum(sf)
-        max_EW = C_EWY
-        max_NS = C_NSX
-    print(counter, "of 42", "\tNSX = ", round(C_NSX) / 100, "\tEWY =", round(C_EWY) / 100, "\tThermal Power =",
-          round(sum(sf) * 100) / 100, "\tArea =", round(area * 100) / 100)
-    counter = counter + 1
+opt_EW = power_calc(opt_EW - 3, opt_EW + 3, 1)
+print("First step optimised at EW =", opt_EW, "\n\nCalculating Third Step...")
+opt_EW = power_calc(opt_EW - 0.9, opt_EW + 1, 0.1)
+opt_NS = math.floor(10 * ((max_area / ((EWC - 1) * opt_EW + 25)) - 25) / (NSC - 1)) / 10
+area = ((NSC - 1) * opt_NS + 25) * ((EWC - 1) * opt_EW + 25) / 4046.85642
 
-# Third 20 Step Process
-print('Performing Final Step of Optimisation...')
-for i in range(math.floor(max_EW / rf * 10) - 10, math.ceil(max_EW / rf * 10) + 11):
-    C_EWY = i / 10
-    C_NSX = math.floor(10 * ((max_area / ((EWC - 1) * C_EWY + 25)) - 25) / (NSC - 1)) / 10
-    if C_NSX < 26:
-        break
-    area = ((NSC - 1) * C_NSX + 25) * ((EWC - 1) * C_EWY + 25) / 4046.85642
-    C_EWY = rf * C_EWY
-    C_NSX = rf * C_NSX
-    for hr in range(0, 24):
-        sf[hr] = 0
-    for hr in range(0, 24):
-        if alpha[hr] * dni[hr] > 0:  # preforming area calculations only if sun is above horizon
-            sf[hr] = sf[hr] + dni[hr] * conv_c2s(math.radians(alpha[hr]), math.radians(gamma[hr]))
-    if sum(sf) > max_energy:
-        max_energy = sum(sf)
-        max_EW = C_EWY
-        max_NS = C_NSX
-    print(counter, "of 42", "\tNSX = ", round(C_NSX) / 100, "\tEWY =", round(C_EWY) / 100, "\tThermal Power =",
-          round(sum(sf) * 100) / 100, "\tArea =", round(area * 100) / 100)
-    counter = counter + 1
-
-with open('CSVData_Output.csv', 'w') as csv_file_out:
-    writer = csv.writer(csv_file_out)
-    writer.writerows(map(lambda x: [x], sf))
-csv_file_out.close()
-
-print("Calculation and Writing completed in", time.process_time() - start_time)
-print(max_NS, max_EW, max_energy)
+print("\nOptimum NS = ", opt_NS, "\t\tOptimum EW = ", opt_EW)
