@@ -3,6 +3,11 @@ import numpy as np
 import csv
 import cv2
 import time
+import pandas as pd
+import tkinter as tk
+import pvlib
+from tkinter import filedialog
+import datetime
 
 side_multiplier = math.sqrt(485 / 380)
 
@@ -138,6 +143,7 @@ def conv_c2s(zenith, azimuth, nsx, ewy):
 
 def power_calc(start, end, step):
     k = start
+    sf = np.zeros(24, dtype='float32')  # solar fraction
     # max_NS = 26  # Optimized NS Spacing
     max_EW = 26  # Optimized EW Spacing
     max_energy = 0  # Optimized Energy Generation
@@ -152,54 +158,103 @@ def power_calc(start, end, step):
         for hr in range(0, 24):
             sf[hr] = 0
         for hr in range(0, 24):
-            if alpha[hr] * dni[hr] > 0:  # preforming area calculations only if sun is above horizon
-                sf[hr] = sf[hr] + dni[hr] * conv_c2s(math.radians(alpha[hr]), math.radians(gamma[hr]), C_NSX, C_EWY)
+            if spa.iloc[hr, 0] * srcdf.iloc[hr, 0] > 0:  # preforming area calculations only if sun is above horizon
+                sf[hr] = sf[hr] + srcdf.iloc[hr, 0] * conv_c2s(math.radians(spa.iloc[hr, 0]),
+                                                               math.radians(spa.iloc[hr, 1]), C_NSX, C_EWY)
         if sum(sf) > max_energy:
             max_energy = sum(sf)
             max_EW = C_EWY
             # max_NS = C_NSX
-        print("NSX = ", round(C_NSX) / 100, "\tEWY =", round(C_EWY) / 100, "\tThermal Power =", round(sum(sf) * 100) / 100, "\tArea =", round(area * 100) / 100)
+        print("NSX = ", round(C_NSX) / 100, "\tEWY =", round(C_EWY) / 100, "\tThermal Power =",
+              round(sum(sf) * 100) / 100, "\tArea =", round(area * 100) / 100)
         # print(k)
         k = k + step
-    return max_EW/rf
+    return max_EW / rf
 
 
-# Main program starts
-start_time = time.process_time()  # For Time of calculation
-alpha = np.zeros(24, dtype='float32')  # Zenith Angle of Sun
-gamma = np.zeros(24, dtype='float32')  # Azimuth Angle of Sun
-dni = np.zeros(24, dtype='float32')  # Azimuth Angle of Sun
-sf = np.zeros(24, dtype='float32')  # solar fraction
-counter = 0
-rf = 100  # Resolution Factor
+''' *** Main program starts *** '''
+start_time = pd.Timestamp.now()  # For Time of calculation
+
+# Initial assignment of variables
+rf = 100  # Resolution Factor for scaling up the image for better accuracy
 max_dia = rf * 2 * math.sqrt(10.5 ** 2 + 5.5 ** 2) * side_multiplier
+h_counter = 2  # Hour counter
+max_dni = 0  # Maximum cumulative DNI of a whole day, used as a check parameter while finding best day
+best_day = 0  # Best Day based on which the optimisation will be performed
+max_area_acre = 20  # Area Constraint in Acres
+max_area = max_area_acre * 4046.85642  # Area Constraint in sq. mtrs
+SingleDishArea = 485  # overlaparea(rf, 0, 0, 0, 0, 1, 1) / (rf ** 2)  #area of single Dish, Should be 485
 
 # Opening Input File
-with open("C:\\Users\\ahson\Google Drive\Testing Ground\PY Files\Field Optimizer\Field-Optimizer\CSV_1_Day_Data.csv",
-          'r') as csv_file_in:
-    csv_reader = csv.reader(csv_file_in)
-    for line in csv_reader:
-        dni[counter] = (float(line[0]))  # DNI Initialized
-        alpha[counter] = (float(line[1]))  # Alpha Angle Initialized
-        gamma[counter] = (float(line[2]))  # Gamma Angle Initialized
-        if counter == 23:
-            break
-        counter = counter + 1
-csv_file_in.close()
+# root = tk.Tk()
+# root.withdraw()
+# xl_location = filedialog.askopenfilename(title="Select Excel File from which data is to be taken ... ")
+xl_location = "C:\\Users\\ahson\Google Drive\Testing Ground\Steam Generation\Sample Master File.xlsm"
+xl_pdata = "Project Data"
+xl_ndata = "NREL Raw"
+print("Loading Data from the source file ...")
+srcdf = pd.read_excel(io=xl_location, sheet_name=xl_pdata, usecols=[1])
 
 print('File read successfully...')
 
 # Initializing Solar Field Layout Parameters
-C_NSY = 0  # NS Spacing in Y Direction
-C_EWX = 0  # EW Spacing in X Direction
-NSC = 10  # Number of dishes in NS Direction
-EWC = 5  # Number of dishes in EW Direction
-max_area_acre = 20  # Area Constraint in Acres
-max_area = max_area_acre * 4046.85642  # Area Constraint in sq. mtrs
-counter = 1
-SingleDishArea = 485  # overlaparea(rf, 0, 0, 0, 0, 1, 1) / (rf ** 2)  #area of single Dish, Should be 485
+C_NSX = srcdf.iloc[35, 0]  # X Distance between NS Dishes
+C_NSY = 0  # Y Distance between NS Dishes
+C_EWX = 0  # X Distance between EW Dishes
+C_EWY = srcdf.iloc[36, 0]  # Y Distance between EW Dishes
+NSC = srcdf.iloc[33, 0]  # Number of NS Dishes
+EWC = srcdf.iloc[34, 0]  # Number of EW Dishes
+latitude = srcdf.iloc[4, 0]  # Latitude of site
+longitude = srcdf.iloc[5, 0]  # Longitude of site
+year = srcdf.iloc[7, 0]  # Year in selection
+if year % 4 == 0:  # This version compensates for leap years simply by going one year back
+    year = year - 1
 MaxSFDishArea = SingleDishArea * NSC * EWC  # area of solar field with 0 shadows
 
+# Loading NREL Raw Data from the excel File
+srcdf = pd.read_excel(io=xl_location, sheet_name=xl_ndata, usecols=[7, 9, 10])
+
+# Finding the best day for optimisation. This is the day with maximum solar Insolation (DNI)
+for i in range(0, 365):
+    dnisum = 0
+    for j in range(0, 24):
+        dnisum = dnisum + srcdf.iloc[h_counter, 0]
+        h_counter = h_counter + 1
+    if dnisum > max_dni:
+        max_dni = dnisum
+        best_day = i + 1
+
+print("Best Day =", best_day, "Performing Optimisation taking this day...")
+
+# Trimming the source data frame so that only the best day data remains, with colums of DNI, pressure and temp. only
+srcdf = srcdf[(best_day - 1) * 24 + 2:best_day * 24 + 2]
+srcdf = srcdf.rename(columns={"Time Zone": "DNI (W/m2)", "Local Time Zone": "Pressure (kPa)",
+                              "Clearsky DHI Units": "Temperature (DegC)"})
+srcdf["Pressure (kPa)"] = srcdf["Pressure (kPa)"] * 10  # Convert pressure from mbar to kPa
+
+# Creating time dataframe for the best day
+date2use = pd.to_datetime(
+    datetime.datetime.strptime(str(int(year) - 2000) + str(best_day), '%y%j').date()) + pd.Timedelta(minutes=30)
+print(date2use)
+time = pd.date_range(date2use, freq='1h', periods=24).tz_localize('Asia/Kolkata')
+
+# Creating Alpha and Gamma angles
+spa = pvlib.solarposition.spa_python(time, latitude, longitude, pressure=srcdf["Pressure (kPa)"],
+                                     temperature=srcdf["Temperature (DegC)"],
+                                     delta_t=67.0, atmos_refract=None, how='numpy')
+
+spa.drop(['apparent_zenith', 'zenith', 'elevation', 'equation_of_time'], axis=1, inplace=True)
+print(time)
+
+spa['azimuth'] = 180 - spa['azimuth']
+for i in range(0, 24):
+    if spa.iloc[i, 0] < 0:
+        spa.iloc[i, 0] = spa.iloc[i, 1] = 0
+
+print("Pre-Optimisation tasks completed in ", (pd.Timestamp.now() - start_time)/np.timedelta64(1,'s'),"seconds")
+
+# Starting Optimisation
+start_time = pd.Timestamp.now()  # For Time of calculation
 print('Parameters Initialized, Calculating Areas...\n\nCalculating First Step...')
 
 opt_EW = power_calc(26, 82, 4)
@@ -212,3 +267,5 @@ opt_NS = math.floor(10 * ((max_area / ((EWC - 1) * opt_EW + 25)) - 25) / (NSC - 
 area = ((NSC - 1) * opt_NS + 25) * ((EWC - 1) * opt_EW + 25) / 4046.85642
 
 print("\nOptimum NS = ", opt_NS, "\t\tOptimum EW = ", opt_EW)
+
+print("Optimisation took", (pd.Timestamp.now() - start_time)/np.timedelta64(1,'s'),"seconds")
