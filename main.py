@@ -189,7 +189,9 @@ SingleDishArea = 485  # overlaparea(rf, 0, 0, 0, 0, 1, 1) / (rf ** 2)  #area of 
 # root = tk.Tk()
 # root.withdraw()
 # xl_location = filedialog.askopenfilename(title="Select Excel File from which data is to be taken ... ")
-xl_location = "C:\\Users\\ahson\Google Drive\Testing Ground\Steam Generation\Sample Master File.xlsm"
+
+#xl_location = "C:\\Users\\ahson\\Google Drive\\Testing Ground\\Steam Generation\\Sample Master File.xlsm"
+xl_location = "C:\\Users\\ahson\\Google Drive\\Testing Ground\\PY Files\\Field Optimizer\\Field-Optimizer\\Sample Master File.xlsm"
 xl_pdata = "Project Data"
 xl_ndata = "NREL Raw"
 print("Loading Data from the source file ...")
@@ -198,12 +200,8 @@ srcdf = pd.read_excel(io=xl_location, sheet_name=xl_pdata, usecols=[1])
 print('File read successfully...')
 
 # Initializing Solar Field Layout Parameters
-C_NSX = srcdf.iloc[35, 0]  # X Distance between NS Dishes
-C_NSY = 0  # Y Distance between NS Dishes
-C_EWX = 0  # X Distance between EW Dishes
-C_EWY = srcdf.iloc[36, 0]  # Y Distance between EW Dishes
-NSC = srcdf.iloc[33, 0]  # Number of NS Dishes
-EWC = srcdf.iloc[34, 0]  # Number of EW Dishes
+NSC = int(srcdf.iloc[33, 0])  # Number of NS Dishes
+EWC = int(srcdf.iloc[34, 0])  # Number of EW Dishes
 latitude = srcdf.iloc[4, 0]  # Latitude of site
 longitude = srcdf.iloc[5, 0]  # Longitude of site
 year = srcdf.iloc[7, 0]  # Year in selection
@@ -235,7 +233,7 @@ srcdf["Pressure (kPa)"] = srcdf["Pressure (kPa)"] * 10  # Convert pressure from 
 # Creating time dataframe for the best day
 date2use = pd.to_datetime(
     datetime.datetime.strptime(str(int(year) - 2000) + str(best_day), '%y%j').date()) + pd.Timedelta(minutes=30)
-print(date2use)
+
 time = pd.date_range(date2use, freq='1h', periods=24).tz_localize('Asia/Kolkata')
 
 # Creating Alpha and Gamma angles
@@ -244,7 +242,7 @@ spa = pvlib.solarposition.spa_python(time, latitude, longitude, pressure=srcdf["
                                      delta_t=67.0, atmos_refract=None, how='numpy')
 
 spa.drop(['apparent_zenith', 'zenith', 'elevation', 'equation_of_time'], axis=1, inplace=True)
-print(time)
+
 
 spa['azimuth'] = 180 - spa['azimuth']
 for i in range(0, 24):
@@ -256,11 +254,11 @@ print("Pre-Optimisation tasks completed in ", (pd.Timestamp.now() - start_time)/
 # Starting Optimisation
 start_time = pd.Timestamp.now()  # For Time of calculation
 print('Parameters Initialized, Calculating Areas...\n\nCalculating First Step...')
-
 opt_EW = power_calc(26, 82, 4)
-print("First step optimised at EW =", opt_EW, "\n\nCalculating Second Step...")
 
+print("First step optimised at EW =", opt_EW, "\n\nCalculating Second Step...")
 opt_EW = power_calc(opt_EW - 3, opt_EW + 3, 1)
+
 print("First step optimised at EW =", opt_EW, "\n\nCalculating Third Step...")
 opt_EW = power_calc(opt_EW - 0.9, opt_EW + 1, 0.1)
 opt_NS = math.floor(10 * ((max_area / ((EWC - 1) * opt_EW + 25)) - 25) / (NSC - 1)) / 10
